@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime
 import re
 
-st.set_page_config(page_title="Estruturador de Energia", layout="centered")
+st.set_page_config(page_title="Operação de Crédito", layout="centered")
 
 def interpolar_flat_forward(du_alvo, curva):
     dias = sorted(curva.keys())
