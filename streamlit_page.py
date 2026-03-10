@@ -89,28 +89,95 @@ except ValueError:
 
 with st.expander("💰 3. Preços por Ano", expanded=True):
     anos = list(range(data_inicio.year, data_fim.year + 1))
-    dados_operacao = {}
+
+    # Inicializa session_state para intervalos
+    if 'intervalos' not in st.session_state:
+        st.session_state.intervalos = {}
+    for ano in anos:
+        if ano not in st.session_state.intervalos:
+            st.session_state.intervalos[ano] = [{"inicio": f"01/{ano}", "fim": f"12/{ano}", "mercado": 150.0, "contrato": 130.0}]
+
+    # Limpa anos que não estão mais no range
+    for ano in list(st.session_state.intervalos.keys()):
+        if ano not in anos:
+            del st.session_state.intervalos[ano]
+
+    dados_operacao_intervalos = {}
     for ano in anos:
         st.write(f"**Ano {ano}**")
-        c1, c2 = st.columns(2)
-        with c1:
-            p_mercado = st.number_input(f"Preço Mercado (R$/MWh)", value=150.0, key=f"m_{ano}")
-        with c2:
-            p_contrato = st.number_input(f"Preço Contrato (R$/MWh)", value=130.0, key=f"c_{ano}")
-        dados_operacao[ano] = {"mercado": p_mercado, "contrato": p_contrato}
+        intervalos_ano = st.session_state.intervalos[ano]
+
+        for i, intervalo in enumerate(intervalos_ano):
+            cols = st.columns([1.5, 1.5, 1.5, 1.5, 0.5])
+            with cols[0]:
+                intervalo['inicio'] = st.text_input("Início", value=intervalo['inicio'], key=f"ini_{ano}_{i}", placeholder="mm/aaaa")
+            with cols[1]:
+                intervalo['fim'] = st.text_input("Fim", value=intervalo['fim'], key=f"fim_{ano}_{i}", placeholder="mm/aaaa")
+            with cols[2]:
+                intervalo['mercado'] = st.number_input("Mercado (R$/MWh)", value=intervalo['mercado'], key=f"m_{ano}_{i}")
+            with cols[3]:
+                intervalo['contrato'] = st.number_input("Contrato (R$/MWh)", value=intervalo['contrato'], key=f"c_{ano}_{i}")
+            with cols[4]:
+                st.write("")
+                st.write("")
+                if len(intervalos_ano) > 1:
+                    if st.button("🗑️", key=f"del_{ano}_{i}"):
+                        st.session_state.intervalos[ano].pop(i)
+                        st.rerun()
+
+        if st.button(f"➕ Adicionar intervalo em {ano}", key=f"add_{ano}"):
+            st.session_state.intervalos[ano].append({"inicio": f"01/{ano}", "fim": f"12/{ano}", "mercado": 150.0, "contrato": 130.0})
+            st.rerun()
+
+        dados_operacao_intervalos[ano] = intervalos_ano
+        st.divider()
 
 st.divider()
 
 if st.button("🚀 Gerar Análise", use_container_width=True):
+
+    # Valida se algum início de intervalo é anterior à data atual
+    erros_intervalo = []
+    for ano, intervalos in st.session_state.intervalos.items():
+        for i, intervalo in enumerate(intervalos):
+            try:
+                ini = datetime.strptime(intervalo['inicio'], "%m/%Y")
+                if ini < hoje:
+                    erros_intervalo.append(f"Ano {ano}, intervalo {i+1}: início {intervalo['inicio']} é anterior ao mês atual ({hoje.strftime('%m/%Y')})")
+            except:
+                erros_intervalo.append(f"Ano {ano}, intervalo {i+1}: data de início inválida ({intervalo['inicio']})")
+
+    if erros_intervalo:
+        for erro in erros_intervalo:
+            st.error(f"❌ {erro}")
+        st.stop()
     datas = pd.date_range(start=data_inicio, end=data_fim, freq='MS')
     df = pd.DataFrame({'Data_Obj': datas})
     df['mês'] = df['Data_Obj'].dt.strftime('%m/%Y')
     df['Ano'] = df['Data_Obj'].dt.year
     df['indices'] = range(1, len(df) + 1)
     df['Horas'] = df['Data_Obj'].dt.days_in_month * 24
-    
-    df['Preço Mercado'] = df['Ano'].map(lambda x: dados_operacao[x]['mercado'])
-    df['Preço Contrato'] = df['Ano'].map(lambda x: dados_operacao[x]['contrato'])
+
+    # Mapeia preço de mercado e contrato por mês com base nos intervalos
+    def get_preco_por_mes(data_obj, campo):
+        ano = data_obj.year
+        for intervalo in st.session_state.intervalos.get(ano, []):
+            try:
+                ini = datetime.strptime(intervalo['inicio'], "%m/%Y")
+                fim = datetime.strptime(intervalo['fim'], "%m/%Y")
+                if ini <= data_obj <= fim:
+                    return intervalo[campo]
+            except:
+                pass
+        # Fallback: primeiro intervalo do ano
+        intervalos_ano = st.session_state.intervalos.get(ano, [])
+        return intervalos_ano[0][campo] if intervalos_ano else 0.0
+
+    df['Preço Mercado']  = df['Data_Obj'].apply(lambda d: get_preco_por_mes(d, 'mercado'))
+    df['Preço Contrato'] = df['Data_Obj'].apply(lambda d: get_preco_por_mes(d, 'contrato'))
+
+    # Para o resumo_anual de preço input, usamos o primeiro intervalo de cada ano como referência
+    dados_operacao = {ano: {"contrato": st.session_state.intervalos[ano][0]['contrato']} for ano in anos}
     
     df['DU_Acumulado'] = df['indices'] * 21
     df['CDI_Anual_Interp'] = df['DU_Acumulado'].apply(lambda x: interpolar_flat_forward(x, curva_anbima))
@@ -147,7 +214,6 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     resumo_anual['Preço Compra Genial (R$/MWh)']  = resumo_anual['Genial_Paga_VP']    / resumo_anual['MWh Total']
     resumo_anual['Preço Venda Genial (R$/MWh)']   = resumo_anual['Genial_Recebe_VP']  / resumo_anual['MWh Total']
     resumo_anual['Preço Contrato Input (R$/MWh)'] = resumo_anual['Ano'].map(lambda x: dados_operacao[x]['contrato'])
-
     # ── Fluxo final do cliente ──
     pagamento_unico = df['Cliente_Recebe_VP'].sum()  # Genial paga tudo de uma vez no mês 1
 
@@ -172,12 +238,21 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     if contrato_genial:
         st.info("""
 **🏦 Contrato Genial**
-A Genial aditiva o contrato original para preços de mercado. O cliente vende um contrato à Genial ao preço de venda calculado, com vencimento total concentrado em **M+0** (pagamento único à vista).
+
+A operação funciona da seguinte forma:
+- A Genial **aditiva o contrato original** para preços de mercado
+- O cliente **vende um contrato à Genial** ao preço de venda calculado
+- O pagamento ao cliente ocorre de forma **integral e antecipada em M+0** (pagamento único à vista)
         """)
     else:
         st.info("""
 **📄 Contrato Externo**
-O cliente cede seu contrato de compra de energia à Genial. Em contrapartida, vende um contrato à Genial ao preço de venda calculado, com vencimento total concentrado em **M+0** (pagamento único à vista). A partir daí, passa a comprar energia da Genial aos preços de mercado atuais, com liquidação registrada mensalmente.
+
+A operação funciona da seguinte forma:
+- O cliente **cede seu contrato de compra** de energia à Genial
+- O cliente **vende um contrato à Genial** ao preço de venda calculado
+- O pagamento ao cliente ocorre de forma **integral e antecipada em M+0** (pagamento único à vista)
+- A partir daí, o cliente passa a **comprar energia da Genial a preços de mercado**, com liquidação registrada mensalmente
         """)
 
     c1, c2, c3 = st.columns(3)
