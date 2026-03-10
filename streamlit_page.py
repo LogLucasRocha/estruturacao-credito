@@ -69,6 +69,8 @@ with st.expander("📅 2. Período e Volume", expanded=True):
     with col_b:
         fim_str = st.text_input("Fim da Operação (mm/aaaa)", value="12/2027")
         spread = st.number_input("Spread CDI (ex: 0.06)", value=0.06, format="%.4f", help="Taxa adicional ao CDI.")
+    
+    contrato_genial = st.toggle("Contrato Genial", value=True)
 
 try:
     data_inicio = datetime.strptime(inicio_str, "%m/%Y")
@@ -144,6 +146,7 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     resumo_anual['Preço Compra Cliente (R$/MWh)'] = resumo_anual['Cliente_Paga_VP']   / resumo_anual['MWh Total']
     resumo_anual['Preço Compra Genial (R$/MWh)']  = resumo_anual['Genial_Paga_VP']    / resumo_anual['MWh Total']
     resumo_anual['Preço Venda Genial (R$/MWh)']   = resumo_anual['Genial_Recebe_VP']  / resumo_anual['MWh Total']
+    resumo_anual['Preço Contrato Input (R$/MWh)'] = resumo_anual['Ano'].map(lambda x: dados_operacao[x]['contrato'])
 
     # ── Fluxo final do cliente ──
     pagamento_unico = df['Cliente_Recebe_VP'].sum()  # Genial paga tudo de uma vez no mês 1
@@ -158,16 +161,31 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
         - df.loc[df.index[0], 'Cliente_Novo_Contrato']
     )
 
+
     st.subheader("👤 Visão Cliente")
     st.caption("A Genial paga ao cliente o valor presente de toda a operação em uma única parcela no primeiro mês.")
 
+    if contrato_genial:
+        st.info("""
+**🏦 Contrato Genial**
+A Genial aditiva o contrato original para preços de mercado. O cliente vende um contrato à Genial ao preço de venda calculado, com vencimento total concentrado em **M+0** (pagamento único à vista).
+        """)
+    else:
+        st.info("""
+**📄 Contrato Externo**
+O cliente cede seu contrato de compra de energia à Genial. Em contrapartida, vende um contrato à Genial ao preço de venda calculado, com vencimento total concentrado em **M+0** (pagamento único à vista). A partir daí, passa a comprar energia da Genial aos preços de mercado atuais, com liquidação registrada mensalmente.
+        """)
+
     c1, c2, c3 = st.columns(3)
-    c1.metric("Contrato Original (total)", f"R$ {formatar_moeda_abrev(df['Cliente_Contrato_Antigo'].sum())}")
+    c1.metric("Contrato Original (total)", f"R$ {formatar_moeda_abrev(-df['Cliente_Contrato_Antigo'].sum())}")
     c2.metric("Recebe da Genial (único)",  f"R$ {formatar_moeda_abrev(pagamento_unico)}")
-    c3.metric("Novo Contrato (total)",     f"R$ {formatar_moeda_abrev(df['Cliente_Novo_Contrato'].sum())}")
+    c3.metric("Novo Contrato (total)",     f"R$ {formatar_moeda_abrev(-df['Cliente_Novo_Contrato'].sum())}")
 
     st.markdown("**📅 Fluxo Mensal do Cliente**")
-    df_cliente = df[['mês', 'Cliente_Contrato_Antigo', 'Cliente_Novo_Contrato', 'Cliente_Fluxo_Final']].rename(columns={
+    df_cliente = df[['mês', 'Cliente_Contrato_Antigo', 'Cliente_Novo_Contrato', 'Cliente_Fluxo_Final']].copy()
+    df_cliente['Cliente_Contrato_Antigo'] = -df_cliente['Cliente_Contrato_Antigo']
+    df_cliente['Cliente_Novo_Contrato']   = -df_cliente['Cliente_Novo_Contrato']
+    df_cliente = df_cliente.rename(columns={
         'Cliente_Contrato_Antigo': 'Contrato Antigo (R$)',
         'Cliente_Novo_Contrato':   'Novo Contrato (R$)',
         'Cliente_Fluxo_Final':     'Fluxo Final (R$)',
@@ -186,6 +204,17 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
         .applymap(colorir_fluxo, subset=['Fluxo Final (R$)']),
     use_container_width=True)
 
+    st.markdown("**📋 Preço de Venda do Contrato — Cliente**")
+    st.caption("Preço médio ponderado anual pelo qual o cliente vende o contrato à Genial (R$/MWh)")
+    df_preco_venda_cliente = resumo_anual[['Ano', 'Preço Contrato Input (R$/MWh)', 'Preço Venda Cliente (R$/MWh)']].rename(columns={
+        'Preço Contrato Input (R$/MWh)': 'Preço Pago no Contrato (R$/MWh)',
+        'Preço Venda Cliente (R$/MWh)':  'Preço de Venda à Genial (R$/MWh)',
+    })
+    st.dataframe(df_preco_venda_cliente.style.format({
+        'Preço Pago no Contrato (R$/MWh)':   'R$ {:.2f}',
+        'Preço de Venda à Genial (R$/MWh)':  'R$ {:.2f}',
+    }), use_container_width=True, hide_index=True)
+
     st.divider()
 
     st.subheader("🏦 Visão Genial Investimentos")
@@ -193,10 +222,9 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
 
     lucro_genial = df['Genial_Resultado_VP'].sum()
     g1, g2, g3 = st.columns(3)
-    g1.metric("Recebe (Mercado)",  f"R$ {formatar_moeda_abrev(df['Genial_Recebe_VP'].sum())}")
-    g2.metric("Paga ao Cliente",   f"R$ {formatar_moeda_abrev(df['Genial_Paga_VP'].sum())}")
-    delta_genial = "✅ Favorável" if lucro_genial >= 0 else "⚠️ Desfavorável"
-    g3.metric("Resultado Líquido", f"R$ {formatar_moeda_abrev(lucro_genial)}", delta=delta_genial)
+    g1.metric("Fluxo Futuro",        f"R$ {formatar_moeda_abrev(df['Genial_Recebe_VP'].sum())}")
+    g2.metric("Desembolso na Cabeça", f"R$ {formatar_moeda_abrev(-df['Genial_Paga_VP'].sum())}")
+    g3.metric("Resultado Líquido",    f"R$ {formatar_moeda_abrev(lucro_genial)}", delta=delta_genial)
 
     df_genial = df[['mês', 'Genial_Recebe_VP']].rename(columns={
         'Genial_Recebe_VP': 'Recebe por Mês (R$)',
@@ -205,15 +233,13 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
         'Recebe por Mês (R$)': 'R$ {:,.2f}',
     }), use_container_width=True)
 
-    st.markdown("**📋 Preço Médio Ponderado Anual — Genial Investimentos**")
-    st.caption("Preço efetivo em VP por MWh = Σ Fluxo VP anual / Σ (Horas × Volume)")
-    df_preco_genial = resumo_anual[['Ano', 'Preço Compra Genial (R$/MWh)', 'Preço Venda Genial (R$/MWh)']].rename(columns={
-        'Preço Compra Genial (R$/MWh)': 'Compra (Contrato) R$/MWh',
-        'Preço Venda Genial (R$/MWh)':  'Vende (Mercado) R$/MWh',
+    st.markdown("**📋 Preço de Compra do Contrato — Genial**")
+    st.caption("Preço médio ponderado anual pelo qual a Genial compra o contrato do cliente (R$/MWh)")
+    df_preco_compra_genial = resumo_anual[['Ano', 'Preço Compra Genial (R$/MWh)']].rename(columns={
+        'Preço Compra Genial (R$/MWh)': 'Preço de Compra (R$/MWh)',
     })
-    st.dataframe(df_preco_genial.style.format({
-        'Compra (Contrato) R$/MWh': 'R$ {:.2f}',
-        'Vende (Mercado) R$/MWh':   'R$ {:.2f}',
+    st.dataframe(df_preco_compra_genial.style.format({
+        'Preço de Compra (R$/MWh)': 'R$ {:.2f}',
     }), use_container_width=True, hide_index=True)
 
     st.divider()
