@@ -95,7 +95,8 @@ with st.expander("💰 3. Preços por Ano", expanded=True):
         st.session_state.intervalos = {}
     for ano in anos:
         if ano not in st.session_state.intervalos:
-            st.session_state.intervalos[ano] = [{"inicio": f"01/{ano}", "fim": f"12/{ano}", "mercado": 150.0, "contrato": 130.0}]
+            inicio_intervalo = inicio_str if ano == data_inicio.year else f"01/{ano}"
+            st.session_state.intervalos[ano] = [{"inicio": inicio_intervalo, "fim": f"12/{ano}", "mercado": 150.0, "contrato": 130.0}]
 
     # Limpa anos que não estão mais no range
     for ano in list(st.session_state.intervalos.keys()):
@@ -126,7 +127,8 @@ with st.expander("💰 3. Preços por Ano", expanded=True):
                         st.rerun()
 
         if st.button(f"➕ Adicionar intervalo em {ano}", key=f"add_{ano}"):
-            st.session_state.intervalos[ano].append({"inicio": f"01/{ano}", "fim": f"12/{ano}", "mercado": 150.0, "contrato": 130.0})
+            inicio_novo = inicio_str if ano == data_inicio.year else f"01/{ano}"
+            st.session_state.intervalos[ano].append({"inicio": inicio_novo, "fim": f"12/{ano}", "mercado": 150.0, "contrato": 130.0})
             st.rerun()
 
         dados_operacao_intervalos[ano] = intervalos_ano
@@ -229,9 +231,6 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
         - df.loc[df.index[0], 'Cliente_Novo_Contrato']
     )
 
-    # ════════════════════════════════════════════════
-    # SEÇÃO 1 — VISÃO CLIENTE
-    # ════════════════════════════════════════════════
     st.subheader("👤 Visão Cliente")
     st.caption("A Genial paga ao cliente o valor presente de toda a operação em uma única parcela no primeiro mês.")
 
@@ -296,9 +295,6 @@ A operação funciona da seguinte forma:
 
     st.divider()
 
-    # ════════════════════════════════════════════════
-    # SEÇÃO 2 — VISÃO GENIAL INVESTIMENTOS
-    # ════════════════════════════════════════════════
     st.subheader("🏦 Visão Genial Investimentos")
     st.caption("Genial **compra** a preço de contrato e **vende** a preço de mercado.")
 
