@@ -70,7 +70,7 @@ with st.expander("📅 2. Período e Volume", expanded=True):
         fim_str = st.text_input("Fim da Operação (mm/aaaa)", value="12/2027")
         spread = st.number_input("Spread CDI (ex: 0.06)", value=0.06, format="%.4f", help="Taxa adicional ao CDI.")
     
-    contrato_genial = st.toggle("Contrato Genial", value=True)
+    contrato_genial = st.toggle("Contrato Genial", value=False, help="Ativo = contrato Genial | Inativo = contrato externo")
 
 try:
     data_inicio = datetime.strptime(inicio_str, "%m/%Y")
@@ -154,6 +154,8 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     df['Cliente_Contrato_Antigo'] = df['Fluxo Contrato']   # paga contrato antigo todo mês
     df['Cliente_Novo_Contrato']   = df['Fluxo Mercado']    # paga novo contrato (mercado) todo mês
 
+    # Mês 1: recebe pagamento único - contrato antigo - novo contrato
+    # Demais meses: - contrato antigo - novo contrato
     df['Cliente_Fluxo_Final'] = - df['Cliente_Contrato_Antigo'] - df['Cliente_Novo_Contrato']
     df.loc[df.index[0], 'Cliente_Fluxo_Final'] = (
         pagamento_unico
@@ -161,7 +163,9 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
         - df.loc[df.index[0], 'Cliente_Novo_Contrato']
     )
 
-
+    # ════════════════════════════════════════════════
+    # SEÇÃO 1 — VISÃO CLIENTE
+    # ════════════════════════════════════════════════
     st.subheader("👤 Visão Cliente")
     st.caption("A Genial paga ao cliente o valor presente de toda a operação em uma única parcela no primeiro mês.")
 
@@ -217,14 +221,17 @@ O cliente cede seu contrato de compra de energia à Genial. Em contrapartida, ve
 
     st.divider()
 
+    # ════════════════════════════════════════════════
+    # SEÇÃO 2 — VISÃO GENIAL INVESTIMENTOS
+    # ════════════════════════════════════════════════
     st.subheader("🏦 Visão Genial Investimentos")
     st.caption("Genial **compra** a preço de contrato e **vende** a preço de mercado.")
 
     lucro_genial = df['Genial_Resultado_VP'].sum()
     g1, g2, g3 = st.columns(3)
-    g1.metric("Fluxo Futuro",        f"R$ {formatar_moeda_abrev(df['Genial_Recebe_VP'].sum())}")
+    g1.metric("Fluxo Futuro",         f"R$ {formatar_moeda_abrev(df['Genial_Recebe_VP'].sum())}")
     g2.metric("Desembolso na Cabeça", f"R$ {formatar_moeda_abrev(-df['Genial_Paga_VP'].sum())}")
-    g3.metric("Resultado Líquido",    f"R$ {formatar_moeda_abrev(lucro_genial)}", delta=delta_genial)
+    g3.metric("Resultado Líquido",    f"R$ {formatar_moeda_abrev(lucro_genial)}")
 
     df_genial = df[['mês', 'Genial_Recebe_VP']].rename(columns={
         'Genial_Recebe_VP': 'Recebe por Mês (R$)',
