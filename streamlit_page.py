@@ -40,6 +40,41 @@ def parse_curva_cdi_colada(texto):
     except:
         return None
 
+def validar_intervalos_ano(ano, intervalos):
+    """Retorna lista de erros para os intervalos de um ano."""
+    erros = []
+    datas_parsed = []
+
+    for i, iv in enumerate(intervalos):
+        try:
+            ini = datetime.strptime(iv['inicio'], "%m/%Y")
+            fim = datetime.strptime(iv['fim'], "%m/%Y")
+        except:
+            erros.append(f"Intervalo {i+1}: data inválida.")
+            datas_parsed.append(None)
+            continue
+
+        if ini.year != ano:
+            erros.append(f"Intervalo {i+1}: início ({iv['inicio']}) deve ser do ano {ano}.")
+        if fim.year != ano:
+            erros.append(f"Intervalo {i+1}: fim ({iv['fim']}) deve ser do ano {ano}.")
+
+        if ini > fim:
+            erros.append(f"Intervalo {i+1}: início não pode ser posterior ao fim.")
+
+        datas_parsed.append((ini, fim))
+
+    # Sobreposição entre intervalos
+    validos = [(i, d) for i, d in enumerate(datas_parsed) if d is not None]
+    for idx_a in range(len(validos)):
+        for idx_b in range(idx_a + 1, len(validos)):
+            i_a, (ini_a, fim_a) = validos[idx_a]
+            i_b, (ini_b, fim_b) = validos[idx_b]
+            if ini_a <= fim_b and ini_b <= fim_a:
+                erros.append(f"Intervalos {i_a+1} e {i_b+1} se sobrepõem.")
+
+    return erros
+
 st.title("⚡ Operações de Crédito")
 st.markdown("Cálculo de fluxo descontado com base na curva de juros colada.")
 st.markdown("Site da Curva de Juros: https://www.anbima.com.br/pt_br/informar/curvas-de-juros-fechamento.htm")
@@ -60,16 +95,15 @@ with st.expander("📈 1. Cole a Curva CDI (ANBIMA)", expanded=True):
         st.error("❌ Erro ao ler a curva. Certifique-se que os números contêm vírgulas para as taxas.")
         st.stop()
 
-with st.expander("📅 2. Período e Volume", expanded=True):
+with st.expander("📅 2. Período e Configuração", expanded=True):
     col_a, col_b = st.columns(2)
     with col_a:
         inicio_default = datetime.now().strftime("%m/%Y")
         inicio_str = st.text_input("Início da Operação (mm/aaaa)", value=inicio_default)
-        volume_mwm = st.number_input("Volume (MWm)", value=10.0, step=1.0)
     with col_b:
         fim_str = st.text_input("Fim da Operação (mm/aaaa)", value="12/2027")
-        spread = st.number_input("Spread CDI (ex: 0.06)", value=0.06, format="%.4f", help="Taxa adicional ao CDI.")
     
+    spread = st.number_input("Spread CDI (ex: 0.06)", value=0.06, format="%.4f", help="Taxa adicional ao CDI.")
     contrato_genial = st.toggle("Contrato Genial", value=False, help="Ativo = contrato Genial | Inativo = contrato externo")
 
 try:
@@ -87,18 +121,22 @@ except ValueError:
     st.warning("Formato de data inválido.")
     st.stop()
 
-with st.expander("💰 3. Preços por Ano", expanded=True):
+with st.expander("💰 3. Preços e Volumes por Ano", expanded=True):
     anos = list(range(data_inicio.year, data_fim.year + 1))
 
-    # Inicializa session_state para intervalos
     if 'intervalos' not in st.session_state:
         st.session_state.intervalos = {}
     for ano in anos:
         if ano not in st.session_state.intervalos:
             inicio_intervalo = inicio_str if ano == data_inicio.year else f"01/{ano}"
-            st.session_state.intervalos[ano] = [{"inicio": inicio_intervalo, "fim": f"12/{ano}", "mercado": 150.0, "contrato": 130.0}]
+            st.session_state.intervalos[ano] = [{
+                "inicio": inicio_intervalo,
+                "fim": f"12/{ano}",
+                "mercado": 150.0,
+                "contrato": 130.0,
+                "volume": 10.0
+            }]
 
-    # Limpa anos que não estão mais no range
     for ano in list(st.session_state.intervalos.keys()):
         if ano not in anos:
             del st.session_state.intervalos[ano]
@@ -109,16 +147,13 @@ with st.expander("💰 3. Preços por Ano", expanded=True):
         intervalos_ano = st.session_state.intervalos[ano]
 
         for i, intervalo in enumerate(intervalos_ano):
-            cols = st.columns([1.5, 1.5, 1.5, 1.5, 0.5])
-            with cols[0]:
+            # Linha 1: datas + botão remover
+            cols1 = st.columns([2, 2, 0.5])
+            with cols1[0]:
                 intervalo['inicio'] = st.text_input("Início", value=intervalo['inicio'], key=f"ini_{ano}_{i}", placeholder="mm/aaaa")
-            with cols[1]:
+            with cols1[1]:
                 intervalo['fim'] = st.text_input("Fim", value=intervalo['fim'], key=f"fim_{ano}_{i}", placeholder="mm/aaaa")
-            with cols[2]:
-                intervalo['mercado'] = st.number_input("Mercado (R$/MWh)", value=intervalo['mercado'], key=f"m_{ano}_{i}")
-            with cols[3]:
-                intervalo['contrato'] = st.number_input("Contrato (R$/MWh)", value=intervalo['contrato'], key=f"c_{ano}_{i}")
-            with cols[4]:
+            with cols1[2]:
                 st.write("")
                 st.write("")
                 if len(intervalos_ano) > 1:
@@ -126,9 +161,32 @@ with st.expander("💰 3. Preços por Ano", expanded=True):
                         st.session_state.intervalos[ano].pop(i)
                         st.rerun()
 
+            # Linha 2: preços e volume
+            cols2 = st.columns(3)
+            with cols2[0]:
+                intervalo['mercado'] = st.number_input("Mercado (R$/MWh)", value=intervalo['mercado'], key=f"m_{ano}_{i}")
+            with cols2[1]:
+                intervalo['contrato'] = st.number_input("Contrato (R$/MWh)", value=intervalo['contrato'], key=f"c_{ano}_{i}")
+            with cols2[2]:
+                intervalo['volume'] = st.number_input("Volume (MWm)", value=intervalo.get('volume', 10.0), step=0.1, key=f"v_{ano}_{i}")
+
+            if i < len(intervalos_ano) - 1:
+                st.markdown("---")
+
+        # Mostra erros de validação em tempo real
+        erros_ano = validar_intervalos_ano(ano, intervalos_ano)
+        for erro in erros_ano:
+            st.error(f"❌ Ano {ano} — {erro}")
+
         if st.button(f"➕ Adicionar intervalo em {ano}", key=f"add_{ano}"):
             inicio_novo = inicio_str if ano == data_inicio.year else f"01/{ano}"
-            st.session_state.intervalos[ano].append({"inicio": inicio_novo, "fim": f"12/{ano}", "mercado": 150.0, "contrato": 130.0})
+            st.session_state.intervalos[ano].append({
+                "inicio": inicio_novo,
+                "fim": f"12/{ano}",
+                "mercado": 150.0,
+                "contrato": 130.0,
+                "volume": 10.0
+            })
             st.rerun()
 
         dados_operacao_intervalos[ano] = intervalos_ano
@@ -138,7 +196,6 @@ st.divider()
 
 if st.button("🚀 Gerar Análise", use_container_width=True):
 
-    # Valida se algum início de intervalo é anterior à data atual
     erros_intervalo = []
     for ano, intervalos in st.session_state.intervalos.items():
         for i, intervalo in enumerate(intervalos):
@@ -149,10 +206,13 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
             except:
                 erros_intervalo.append(f"Ano {ano}, intervalo {i+1}: data de início inválida ({intervalo['inicio']})")
 
+        erros_intervalo += [f"Ano {ano} — {e}" for e in validar_intervalos_ano(ano, intervalos)]
+
     if erros_intervalo:
         for erro in erros_intervalo:
             st.error(f"❌ {erro}")
         st.stop()
+
     datas = pd.date_range(start=data_inicio, end=data_fim, freq='MS')
     df = pd.DataFrame({'Data_Obj': datas})
     df['mês'] = df['Data_Obj'].dt.strftime('%m/%Y')
@@ -160,8 +220,7 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     df['indices'] = range(1, len(df) + 1)
     df['Horas'] = df['Data_Obj'].dt.days_in_month * 24
 
-    # Mapeia preço de mercado e contrato por mês com base nos intervalos
-    def get_preco_por_mes(data_obj, campo):
+    def get_campo_por_mes(data_obj, campo):
         ano = data_obj.year
         for intervalo in st.session_state.intervalos.get(ano, []):
             try:
@@ -171,24 +230,22 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
                     return intervalo[campo]
             except:
                 pass
-        # Fallback: primeiro intervalo do ano
         intervalos_ano = st.session_state.intervalos.get(ano, [])
         return intervalos_ano[0][campo] if intervalos_ano else 0.0
 
-    df['Preço Mercado']  = df['Data_Obj'].apply(lambda d: get_preco_por_mes(d, 'mercado'))
-    df['Preço Contrato'] = df['Data_Obj'].apply(lambda d: get_preco_por_mes(d, 'contrato'))
+    df['Preço Mercado']  = df['Data_Obj'].apply(lambda d: get_campo_por_mes(d, 'mercado'))
+    df['Preço Contrato'] = df['Data_Obj'].apply(lambda d: get_campo_por_mes(d, 'contrato'))
+    df['Volume']         = df['Data_Obj'].apply(lambda d: get_campo_por_mes(d, 'volume'))
 
-    # Para o resumo_anual de preço input, usamos o primeiro intervalo de cada ano como referência
     dados_operacao = {ano: {"contrato": st.session_state.intervalos[ano][0]['contrato']} for ano in anos}
-    
+
     df['DU_Acumulado'] = df['indices'] * 21
     df['CDI_Anual_Interp'] = df['DU_Acumulado'].apply(lambda x: interpolar_flat_forward(x, curva_anbima))
     df['Taxa_Desconto_Mensal'] = ((1 + df['CDI_Anual_Interp']) * (1 + spread))**(1/12) - 1
-
     df['Fator_Desconto'] = ((1 + df['CDI_Anual_Interp']) * (1 + spread)) ** (df['DU_Acumulado'] / 252)
 
-    df['Fluxo Mercado']  = volume_mwm * df['Horas'] * df['Preço Mercado']
-    df['Fluxo Contrato'] = volume_mwm * df['Horas'] * df['Preço Contrato']
+    df['Fluxo Mercado']  = df['Volume'] * df['Horas'] * df['Preço Mercado']
+    df['Fluxo Contrato'] = df['Volume'] * df['Horas'] * df['Preço Contrato']
 
     # ── Visão Cliente ──
     df['Cliente_Paga_VP']      = df['Fluxo Mercado']
@@ -201,7 +258,7 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     df['Genial_Resultado_VP'] = df['Genial_Recebe_VP'] - df['Genial_Paga_VP']
 
     # ── Peso mensal ──
-    df['Peso_MWh'] = df['Horas'] * volume_mwm
+    df['Peso_MWh'] = df['Horas'] * df['Volume']
 
     resumo_anual = df.groupby('Ano').apply(lambda g: pd.Series({
         'MWh Total':         g['Peso_MWh'].sum(),
@@ -216,14 +273,13 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     resumo_anual['Preço Compra Genial (R$/MWh)']  = resumo_anual['Genial_Paga_VP']    / resumo_anual['MWh Total']
     resumo_anual['Preço Venda Genial (R$/MWh)']   = resumo_anual['Genial_Recebe_VP']  / resumo_anual['MWh Total']
     resumo_anual['Preço Contrato Input (R$/MWh)'] = resumo_anual['Ano'].map(lambda x: dados_operacao[x]['contrato'])
+
     # ── Fluxo final do cliente ──
-    pagamento_unico = df['Cliente_Recebe_VP'].sum()  # Genial paga tudo de uma vez no mês 1
+    pagamento_unico = df['Cliente_Recebe_VP'].sum()
 
-    df['Cliente_Contrato_Antigo'] = df['Fluxo Contrato']   # paga contrato antigo todo mês
-    df['Cliente_Novo_Contrato']   = df['Fluxo Mercado']    # paga novo contrato (mercado) todo mês
+    df['Cliente_Contrato_Antigo'] = df['Fluxo Contrato']
+    df['Cliente_Novo_Contrato']   = df['Fluxo Mercado']
 
-    # Mês 1: recebe pagamento único - contrato antigo - novo contrato
-    # Demais meses: - contrato antigo - novo contrato
     df['Cliente_Fluxo_Final'] = - df['Cliente_Contrato_Antigo'] - df['Cliente_Novo_Contrato']
     df.loc[df.index[0], 'Cliente_Fluxo_Final'] = (
         pagamento_unico
@@ -260,13 +316,14 @@ A operação funciona da seguinte forma:
     c3.metric("Novo Contrato (total)",     f"R$ {formatar_moeda_abrev(-df['Cliente_Novo_Contrato'].sum())}")
 
     st.markdown("**📅 Fluxo Mensal do Cliente**")
-    df_cliente = df[['mês', 'Cliente_Contrato_Antigo', 'Cliente_Novo_Contrato', 'Cliente_Fluxo_Final']].copy()
+    df_cliente = df[['mês', 'Volume', 'Cliente_Contrato_Antigo', 'Cliente_Novo_Contrato', 'Cliente_Fluxo_Final']].copy()
     df_cliente['Cliente_Contrato_Antigo'] = -df_cliente['Cliente_Contrato_Antigo']
     df_cliente['Cliente_Novo_Contrato']   = -df_cliente['Cliente_Novo_Contrato']
     df_cliente = df_cliente.rename(columns={
-        'Cliente_Contrato_Antigo': 'Contrato Antigo (R$)',
-        'Cliente_Novo_Contrato':   'Novo Contrato (R$)',
-        'Cliente_Fluxo_Final':     'Fluxo Final (R$)',
+        'Volume':                    'Volume (MWm)',
+        'Cliente_Contrato_Antigo':   'Contrato Antigo (R$)',
+        'Cliente_Novo_Contrato':     'Novo Contrato (R$)',
+        'Cliente_Fluxo_Final':       'Fluxo Final (R$)',
     })
 
     def colorir_fluxo(val):
@@ -275,9 +332,10 @@ A operação funciona da seguinte forma:
 
     st.dataframe(df_cliente.style
         .format({
-            'Contrato Antigo (R$)': 'R$ {:,.2f}',
-            'Novo Contrato (R$)':   'R$ {:,.2f}',
-            'Fluxo Final (R$)':     'R$ {:,.2f}',
+            'Volume (MWm)':          '{:.2f}',
+            'Contrato Antigo (R$)':  'R$ {:,.2f}',
+            'Novo Contrato (R$)':    'R$ {:,.2f}',
+            'Fluxo Final (R$)':      'R$ {:,.2f}',
         })
         .applymap(colorir_fluxo, subset=['Fluxo Final (R$)']),
     use_container_width=True)
@@ -304,10 +362,12 @@ A operação funciona da seguinte forma:
     g2.metric("Desembolso na Cabeça", f"R$ {formatar_moeda_abrev(-df['Genial_Paga_VP'].sum())}")
     g3.metric("Resultado Líquido",    f"R$ {formatar_moeda_abrev(lucro_genial)}")
 
-    df_genial = df[['mês', 'Genial_Recebe_VP']].rename(columns={
+    df_genial = df[['mês', 'Volume', 'Genial_Recebe_VP']].rename(columns={
+        'Volume':          'Volume (MWm)',
         'Genial_Recebe_VP': 'Recebe por Mês (R$)',
     })
     st.dataframe(df_genial.style.format({
+        'Volume (MWm)':        '{:.2f}',
         'Recebe por Mês (R$)': 'R$ {:,.2f}',
     }), use_container_width=True)
 
@@ -322,7 +382,6 @@ A operação funciona da seguinte forma:
 
     st.divider()
 
-    # Export CSV completo
     csv = df.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Exportar para CSV", csv, "calculo_energia.csv", "text/csv", use_container_width=True)
 
