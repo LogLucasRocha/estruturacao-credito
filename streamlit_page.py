@@ -41,7 +41,6 @@ def parse_curva_cdi_colada(texto):
         return None
 
 def validar_intervalos_ano(ano, intervalos):
-    """Retorna lista de erros para os intervalos de um ano."""
     erros = []
     datas_parsed = []
 
@@ -64,7 +63,6 @@ def validar_intervalos_ano(ano, intervalos):
 
         datas_parsed.append((ini, fim))
 
-    # Sobreposição entre intervalos
     validos = [(i, d) for i, d in enumerate(datas_parsed) if d is not None]
     for idx_a in range(len(validos)):
         for idx_b in range(idx_a + 1, len(validos)):
@@ -75,18 +73,19 @@ def validar_intervalos_ano(ano, intervalos):
 
     return erros
 
+# ─────────────────────────────────────────────
 st.title("⚡ Operações de Crédito")
 st.markdown("Cálculo de fluxo descontado com base na curva de juros colada.")
 st.markdown("Site da Curva de Juros: https://www.anbima.com.br/pt_br/informar/curvas-de-juros-fechamento.htm")
 
 with st.expander("📈 1. Cole a Curva CDI (ANBIMA)", expanded=True):
     st.caption("Cole o bloco de texto da curva abaixo:")
-    curva_raw = st.text_area("Dados da Curva", 
+    curva_raw = st.text_area("Dados da Curva",
                              value="2114,547950413,02414214,449675613,22196314,31861.00813,468712613,88061.26013,678025213,26332.52014,0008",
                              help="O sistema separa automaticamente os Dias Úteis das Taxas.")
-    
+
     curva_anbima = parse_curva_cdi_colada(curva_raw)
-    
+
     if curva_anbima:
         st.success(f"✅ Curva identificada: {len(curva_anbima)} vértices.")
         df_curva = pd.DataFrame(list(curva_anbima.items()), columns=['Dias Úteis', 'Taxa (%)']).sort_values('Dias Úteis')
@@ -102,7 +101,7 @@ with st.expander("📅 2. Período e Configuração", expanded=True):
         inicio_str = st.text_input("Início da Operação (mm/aaaa)", value=inicio_default)
     with col_b:
         fim_str = st.text_input("Fim da Operação (mm/aaaa)", value="12/2027")
-    
+
     spread = st.number_input("Spread CDI (ex: 0.06)", value=0.06, format="%.4f", help="Taxa adicional ao CDI.")
     contrato_genial = st.toggle("Contrato Genial", value=False, help="Ativo = contrato Genial | Inativo = contrato externo")
 
@@ -147,7 +146,6 @@ with st.expander("💰 3. Preços e Volumes por Ano", expanded=True):
         intervalos_ano = st.session_state.intervalos[ano]
 
         for i, intervalo in enumerate(intervalos_ano):
-            # Linha 1: datas + botão remover
             cols1 = st.columns([2, 2, 0.5])
             with cols1[0]:
                 intervalo['inicio'] = st.text_input("Início", value=intervalo['inicio'], key=f"ini_{ano}_{i}", placeholder="mm/aaaa")
@@ -161,7 +159,6 @@ with st.expander("💰 3. Preços e Volumes por Ano", expanded=True):
                         st.session_state.intervalos[ano].pop(i)
                         st.rerun()
 
-            # Linha 2: preços e volume
             cols2 = st.columns(3)
             with cols2[0]:
                 intervalo['mercado'] = st.number_input("Mercado (R$/MWh)", value=intervalo['mercado'], key=f"m_{ano}_{i}")
@@ -173,7 +170,6 @@ with st.expander("💰 3. Preços e Volumes por Ano", expanded=True):
             if i < len(intervalos_ano) - 1:
                 st.markdown("---")
 
-        # Mostra erros de validação em tempo real
         erros_ano = validar_intervalos_ano(ano, intervalos_ano)
         for erro in erros_ano:
             st.error(f"❌ Ano {ano} — {erro}")
@@ -253,25 +249,23 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     df['Cliente_Resultado_VP'] = df['Cliente_Recebe_VP'] - df['Cliente_Paga_VP']
 
     # ── Visão Genial ──
-    df['Genial_Recebe_VP']    = df['Fluxo Mercado']
-    df['Genial_Paga_VP']      = df['Fluxo Mercado'] / df['Fator_Desconto']
-    df['Genial_Resultado_VP'] = df['Genial_Recebe_VP'] - df['Genial_Paga_VP']
+    # A Genial recebe mensalmente apenas o valor de mercado (Volume × Horas × Preço Mercado)
+    # O contrato antigo NÃO entra no fluxo da Genial
+    df['Genial_Recebe_Mensal'] = df['Fluxo Mercado']
 
     # ── Peso mensal ──
     df['Peso_MWh'] = df['Horas'] * df['Volume']
 
     resumo_anual = df.groupby('Ano').apply(lambda g: pd.Series({
-        'MWh Total':         g['Peso_MWh'].sum(),
-        'Cliente_Recebe_VP': g['Cliente_Recebe_VP'].sum(),
-        'Cliente_Paga_VP':   g['Cliente_Paga_VP'].sum(),
-        'Genial_Recebe_VP':  g['Genial_Recebe_VP'].sum(),
-        'Genial_Paga_VP':    g['Genial_Paga_VP'].sum(),
+        'MWh Total':            g['Peso_MWh'].sum(),
+        'Cliente_Recebe_VP':    g['Cliente_Recebe_VP'].sum(),
+        'Cliente_Paga_VP':      g['Cliente_Paga_VP'].sum(),
+        'Genial_Recebe_Mensal': g['Genial_Recebe_Mensal'].sum(),
     })).reset_index()
 
-    resumo_anual['Preço Venda Cliente (R$/MWh)']  = resumo_anual['Cliente_Recebe_VP'] / resumo_anual['MWh Total']
-    resumo_anual['Preço Compra Cliente (R$/MWh)'] = resumo_anual['Cliente_Paga_VP']   / resumo_anual['MWh Total']
-    resumo_anual['Preço Compra Genial (R$/MWh)']  = resumo_anual['Genial_Paga_VP']    / resumo_anual['MWh Total']
-    resumo_anual['Preço Venda Genial (R$/MWh)']   = resumo_anual['Genial_Recebe_VP']  / resumo_anual['MWh Total']
+    resumo_anual['Preço Venda Cliente (R$/MWh)']  = resumo_anual['Cliente_Recebe_VP']    / resumo_anual['MWh Total']
+    resumo_anual['Preço Compra Cliente (R$/MWh)'] = resumo_anual['Cliente_Paga_VP']       / resumo_anual['MWh Total']
+    resumo_anual['Preço Recebe Genial (R$/MWh)']  = resumo_anual['Genial_Recebe_Mensal']  / resumo_anual['MWh Total']
     resumo_anual['Preço Contrato Input (R$/MWh)'] = resumo_anual['Ano'].map(lambda x: dados_operacao[x]['contrato'])
 
     # ── Fluxo final do cliente ──
@@ -287,6 +281,7 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
         - df.loc[df.index[0], 'Cliente_Novo_Contrato']
     )
 
+    # ─────────────────────────────────────────────
     st.subheader("👤 Visão Cliente")
     st.caption("A Genial paga ao cliente o valor presente de toda a operação em uma única parcela no primeiro mês.")
 
@@ -322,10 +317,10 @@ A operação funciona da seguinte forma:
     df_cliente['Cliente_Contrato_Antigo'] = -df_cliente['Cliente_Contrato_Antigo']
     df_cliente['Cliente_Novo_Contrato']   = -df_cliente['Cliente_Novo_Contrato']
     df_cliente = df_cliente.rename(columns={
-        'Volume':                    'Volume (MWm)',
-        'Cliente_Contrato_Antigo':   'Contrato Antigo (R$)',
-        'Cliente_Novo_Contrato':     'Novo Contrato (R$)',
-        'Cliente_Fluxo_Final':       'Fluxo Final (R$)',
+        'Volume':                  'Volume (MWm)',
+        'Cliente_Contrato_Antigo': 'Contrato Antigo (R$)',
+        'Cliente_Novo_Contrato':   'Novo Contrato (R$)',
+        'Cliente_Fluxo_Final':     'Fluxo Final (R$)',
     })
 
     def colorir_fluxo(val):
@@ -334,10 +329,10 @@ A operação funciona da seguinte forma:
 
     st.dataframe(df_cliente.style
         .format({
-            'Volume (MWm)':          '{:.2f}',
-            'Contrato Antigo (R$)':  'R$ {:,.2f}',
-            'Novo Contrato (R$)':    'R$ {:,.2f}',
-            'Fluxo Final (R$)':      'R$ {:,.2f}',
+            'Volume (MWm)':         '{:.2f}',
+            'Contrato Antigo (R$)': 'R$ {:,.2f}',
+            'Novo Contrato (R$)':   'R$ {:,.2f}',
+            'Fluxo Final (R$)':     'R$ {:,.2f}',
         })
         .applymap(colorir_fluxo, subset=['Fluxo Final (R$)']),
     use_container_width=True)
@@ -349,37 +344,55 @@ A operação funciona da seguinte forma:
         'Preço Venda Cliente (R$/MWh)':  'Preço de Venda à Genial (R$/MWh)',
     })
     st.dataframe(df_preco_venda_cliente.style.format({
-        'Preço Pago no Contrato (R$/MWh)':   'R$ {:.2f}',
-        'Preço de Venda à Genial (R$/MWh)':  'R$ {:.2f}',
+        'Preço Pago no Contrato (R$/MWh)':  'R$ {:.2f}',
+        'Preço de Venda à Genial (R$/MWh)': 'R$ {:.2f}',
     }), use_container_width=True, hide_index=True)
 
     st.divider()
 
+    # ─────────────────────────────────────────────
     st.subheader("🏦 Visão Genial Investimentos")
-    st.caption("Genial **compra** a preço de contrato e **vende** a preço de mercado.")
+    st.caption("Genial **paga** ao cliente o VP total antecipado e **recebe** mensalmente o valor de mercado.")
 
-    lucro_genial = df['Genial_Resultado_VP'].sum()
+    # Desembolso único = pagamento antecipado ao cliente (VP total dos fluxos de mercado)
+    desembolso_genial = pagamento_unico
+
+    # Fluxo mensal da Genial: recebe o valor de mercado cada mês
+    df_genial = df[['mês', 'Volume', 'Genial_Recebe_Mensal']].copy()
+    df_genial['Genial_Desembolso'] = 0.0
+    df_genial.loc[df_genial.index[0], 'Genial_Desembolso'] = -desembolso_genial
+    df_genial['Genial_Fluxo_Final'] = df_genial['Genial_Recebe_Mensal'] + df_genial['Genial_Desembolso']
+
+    lucro_genial = df_genial['Genial_Fluxo_Final'].sum()
+
     g1, g2, g3 = st.columns(3)
-    g1.metric("Fluxo Futuro",         f"R$ {formatar_moeda_abrev(df['Genial_Recebe_VP'].sum())}")
-    g2.metric("Desembolso na Cabeça", f"R$ {formatar_moeda_abrev(-df['Genial_Paga_VP'].sum())}")
-    g3.metric("Resultado Líquido",    f"R$ {formatar_moeda_abrev(lucro_genial)}")
+    g1.metric("Recebe (total futuro)",    f"R$ {formatar_moeda_abrev(df_genial['Genial_Recebe_Mensal'].sum())}")
+    g2.metric("Desembolso na Cabeça",     f"R$ {formatar_moeda_abrev(-desembolso_genial)}")
+    g3.metric("Resultado Líquido",        f"R$ {formatar_moeda_abrev(lucro_genial)}")
 
-    df_genial = df[['mês', 'Volume', 'Genial_Recebe_VP']].rename(columns={
-        'Volume':          'Volume (MWm)',
-        'Genial_Recebe_VP': 'Recebe por Mês (R$)',
+    st.markdown("**📅 Fluxo Mensal da Genial**")
+    df_genial = df_genial.rename(columns={
+        'Volume':               'Volume (MWm)',
+        'Genial_Recebe_Mensal': 'Recebe de Contrato (R$)',
+        'Genial_Fluxo_Final':   'Fluxo Final (R$)',
     })
-    st.dataframe(df_genial.style.format({
-        'Volume (MWm)':        '{:.2f}',
-        'Recebe por Mês (R$)': 'R$ {:,.2f}',
-    }), use_container_width=True)
 
-    st.markdown("**📋 Preço de Compra do Contrato — Genial**")
-    st.caption("Preço médio ponderado anual pelo qual a Genial compra o contrato do cliente (R$/MWh)")
-    df_preco_compra_genial = resumo_anual[['Ano', 'Preço Compra Genial (R$/MWh)']].rename(columns={
-        'Preço Compra Genial (R$/MWh)': 'Preço de Compra (R$/MWh)',
+    st.dataframe(df_genial[['mês', 'Volume (MWm)', 'Recebe de Contrato (R$)', 'Fluxo Final (R$)']].style
+        .format({
+            'Volume (MWm)':        '{:.2f}',
+            'Recebe de Contrato (R$)': 'R$ {:,.2f}',
+            'Fluxo Final (R$)':    'R$ {:,.2f}',
+        })
+        .applymap(colorir_fluxo, subset=['Fluxo Final (R$)']),
+    use_container_width=True)
+
+    st.markdown("**📋 Preço de Recebimento Médio — Genial**")
+    st.caption("Preço médio ponderado anual recebido pela Genial via contratos de mercado (R$/MWh)")
+    df_preco_genial = resumo_anual[['Ano', 'Preço Recebe Genial (R$/MWh)']].rename(columns={
+        'Preço Recebe Genial (R$/MWh)': 'Preço de Recebimento (R$/MWh)',
     })
-    st.dataframe(df_preco_compra_genial.style.format({
-        'Preço de Compra (R$/MWh)': 'R$ {:.2f}',
+    st.dataframe(df_preco_genial.style.format({
+        'Preço de Recebimento (R$/MWh)': 'R$ {:.2f}',
     }), use_container_width=True, hide_index=True)
 
     st.divider()
