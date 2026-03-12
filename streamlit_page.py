@@ -298,6 +298,7 @@ A operação funciona da seguinte forma:
 - A Genial **aditiva o contrato original** para preços de mercado
 - O cliente **vende um contrato à Genial** ao preço de venda calculado
 - O pagamento ao cliente ocorre de forma **integral e antecipada em M+0** (pagamento único à vista)
+- O cliente deve fazer o **registro antecipado do volume negociado na CCEE** a favor da Genial
         """)
     else:
         st.info("""
@@ -308,6 +309,7 @@ A operação funciona da seguinte forma:
 - O cliente **vende um contrato à Genial** ao preço de venda calculado
 - O pagamento ao cliente ocorre de forma **integral e antecipada em M+0** (pagamento único à vista)
 - A partir daí, o cliente passa a **comprar energia da Genial a preços de mercado**, com liquidação registrada mensalmente
+- O cliente deve fazer o **registro antecipado do volume negociado na CCEE** a favor da Genial
         """)
 
     c1, c2, c3 = st.columns(3)
