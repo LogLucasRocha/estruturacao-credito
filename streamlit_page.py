@@ -73,7 +73,10 @@ def validar_intervalos_ano(ano, intervalos):
 
     return erros
 
-# ─────────────────────────────────────────────
+def colorir_fluxo(val):
+    cor = "#2ecc71" if val >= 0 else "#e74c3c"
+    return f"color: {cor}; font-weight: bold;"
+
 st.title("⚡ Operações de Crédito")
 st.markdown("Cálculo de fluxo descontado com base na curva de juros colada.")
 st.markdown("Site da Curva de Juros: https://www.anbima.com.br/pt_br/informar/curvas-de-juros-fechamento.htm")
@@ -106,6 +109,50 @@ with st.expander("📅 2. Período e Configuração", expanded=True):
     pagamento_str = st.text_input("Mês do Pagamento Antecipado (mm/aaaa)", value=inicio_default, help="Mês em que a Genial realizará o pagamento único ao cliente.")
     contrato_genial = st.toggle("Contrato Genial", value=False, help="Ativo = contrato Genial | Inativo = contrato externo")
 
+    # ── Modo de Operação ──
+    MODOS = {
+        "📋 Modo Padrão": "padrao",
+        "⚡ Modo A — Pagar desde o início, receber no pagamento": "modo_a",
+        "🚀 Modo B — Receber crédito antecipado, pagar aditivo depois": "modo_b",
+    }
+    MODO_DESCRICOES = {
+        "padrao": """
+**Como funciona:**
+O cliente continua pagando somente seu contrato original até o mês do pagamento. No mês configurado, a Genial faz um pagamento único equivalente ao valor presente de todos os fluxos de mercado futuros. A partir desse mês, o cliente passa a pagar também o novo contrato de mercado mensalmente.
+
+**Exemplo — Contrato mar/25 a dez/27, pagamento em jun/25:**
+- **Mar–Mai/25:** Cliente paga apenas o contrato original (ex: R$ 130/MWh)
+- **Jun/25:** Genial paga o VP total ao cliente em parcela única
+- **Jun/25–Dez/27:** Cliente paga contrato original + mercado mensalmente
+""",
+        "modo_a": """
+**Como funciona:**
+O cliente passa a pagar o novo contrato de mercado desde o primeiro mês da operação, antes mesmo de receber qualquer pagamento. Em contrapartida, a Genial desconta o VP de todo o período — incluindo os meses já aditivados — e entrega o crédito único no mês de pagamento configurado.
+
+**Exemplo — Contrato mar/25 a dez/27, pagamento em jun/25:**
+- **Mar–Mai/25:** Cliente paga contrato original + mercado (ex: R$ 130 + R$ 150/MWh)
+- **Jun/25:** Genial paga o VP de todo o período (mar/25 → dez/27) em parcela única
+- **Jun/25–Dez/27:** Cliente paga contrato original + mercado mensalmente
+
+> O VP recebido em jun/25 é maior que no Modo Padrão, pois inclui o desconto dos meses já aditivados.
+""",
+        "modo_b": """
+**Como funciona:**
+A Genial paga o crédito ao cliente logo no primeiro mês, referente ao período do mês de pagamento até o fim do contrato. Durante o intervalo entre o início e o mês de pagamento, o cliente não paga o aditivo de mercado — apenas o contrato original. A partir do mês de pagamento, passa a pagar normalmente o novo contrato de mercado.
+
+**Exemplo — Contrato mar/25 a dez/27, pagamento em jun/25:**
+- **Mar/25:** Genial paga ao cliente o VP de jun/25 → dez/27 antecipado
+- **Mar–Mai/25:** Cliente paga apenas o contrato original (ex: R$ 130/MWh), sem aditivo
+- **Jun/25–Dez/27:** Cliente paga contrato original + mercado mensalmente
+
+> O VP recebido em mar/25 é menor que nos outros modos, pois cobre apenas o período jun/25 → dez/27.
+""",
+    }
+
+    modo_label = st.selectbox("Selecione o modo de operação:", options=list(MODOS.keys()))
+    modo_operacao = MODOS[modo_label]
+    st.info(MODO_DESCRICOES[modo_operacao])
+
 try:
     data_inicio = datetime.strptime(inicio_str, "%m/%Y")
     data_fim = datetime.strptime(fim_str, "%m/%Y")
@@ -123,6 +170,9 @@ try:
         st.stop()
     if data_pagamento > data_fim:
         st.error("O mês de pagamento não pode ser posterior ao fim da operação.")
+        st.stop()
+    if modo_operacao == "modo_b" and data_pagamento <= data_inicio:
+        st.error("No Modo B, o mês de pagamento deve ser posterior ao início da operação (pois há um período sem aditivo).")
         st.stop()
 except ValueError:
     st.warning("Formato de data inválido.")
@@ -248,7 +298,7 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     df['Taxa_Desconto_Mensal'] = ((1 + df['CDI_Anual_Interp']) * (1 + spread))**(1/12) - 1
     df['Fator_Desconto'] = ((1 + df['CDI_Anual_Interp']) * (1 + spread)) ** (df['DU_Acumulado'] / 252)
 
-    # DU do mês de pagamento (índice relativo ao início da operação)
+    # ── Índice e fator do mês de pagamento ──
     indice_pagamento = (data_pagamento.year - data_inicio.year) * 12 + (data_pagamento.month - data_inicio.month) + 1
     du_pagamento = indice_pagamento * 21
     cdi_pagamento = interpolar_flat_forward(du_pagamento, curva_anbima)
@@ -260,69 +310,132 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     df['Fluxo Mercado']  = df['Volume'] * df['Horas'] * df['Preço Mercado']
     df['Fluxo Contrato'] = df['Volume'] * df['Horas'] * df['Preço Contrato']
 
-    # ── Visão Cliente ──
-    df['Cliente_Paga_VP']      = df['Fluxo Mercado']
-    df['Cliente_Recebe_VP']    = df.apply(
-        lambda row: row['Fluxo Mercado'] / row['Fator_Desconto_Relativo'] if row['Data_Obj'] >= data_pagamento else 0.0,
-        axis=1
-    )
-    df['Cliente_Resultado_VP'] = df['Cliente_Recebe_VP'] - df['Cliente_Paga_VP']
+    # Índice do mês de pagamento no dataframe
+    idx_pagamento = df[df['Data_Obj'] == data_pagamento].index
+    idx_pag = idx_pagamento[0] if len(idx_pagamento) > 0 else df.index[0]
 
-    # ── Visão Genial ──
-    # A Genial recebe mensalmente apenas o valor de mercado (Volume × Horas × Preço Mercado)
-    # O contrato antigo NÃO entra no fluxo da Genial
-    df['Genial_Recebe_Mensal'] = df['Fluxo Mercado']
+    if modo_operacao == "padrao":
 
-    # ── Peso mensal ──
+        # VP total descontado ao mês de pagamento
+        df['Cliente_Recebe_VP'] = df.apply(
+            lambda row: row['Fluxo Mercado'] / row['Fator_Desconto_Relativo'] if row['Data_Obj'] >= data_pagamento else 0.0,
+            axis=1
+        )
+        pagamento_unico = df['Cliente_Recebe_VP'].sum()
+
+        df['Cliente_Contrato_Antigo'] = df['Fluxo Contrato']
+        df['Cliente_Novo_Contrato']   = df.apply(
+            lambda row: row['Fluxo Mercado'] if row['Data_Obj'] >= data_pagamento else 0.0,
+            axis=1
+        )
+
+        df['Cliente_Fluxo_Final'] = df.apply(
+            lambda row: -row['Cliente_Contrato_Antigo']
+            if row['Data_Obj'] < data_pagamento
+            else -row['Cliente_Contrato_Antigo'] - row['Cliente_Novo_Contrato'],
+            axis=1
+        )
+        df.loc[idx_pag, 'Cliente_Fluxo_Final'] = (
+            pagamento_unico
+            - df.loc[idx_pag, 'Cliente_Contrato_Antigo']
+            - df.loc[idx_pag, 'Cliente_Novo_Contrato']
+        )
+
+        df['Genial_Recebe_Mensal'] = df.apply(
+            lambda row: row['Fluxo Mercado'] if row['Data_Obj'] >= data_pagamento else 0.0,
+            axis=1
+        )
+
+    elif modo_operacao == "modo_a":
+
+        # VP relativo ao mês de pagamento, de TODOS os meses (incluindo os anteriores ao pagamento)
+        df['Cliente_Recebe_VP'] = df['Fluxo Mercado'] / df['Fator_Desconto_Relativo']
+        pagamento_unico = df['Cliente_Recebe_VP'].sum()
+
+        df['Cliente_Contrato_Antigo'] = df['Fluxo Contrato']
+        # Cliente paga mercado desde o início
+        df['Cliente_Novo_Contrato'] = df['Fluxo Mercado']
+
+        # Fluxo mensal: paga contrato antigo + mercado todos os meses
+        df['Cliente_Fluxo_Final'] = -df['Cliente_Contrato_Antigo'] - df['Cliente_Novo_Contrato']
+        # No mês do pagamento: adiciona o recebimento único
+        df.loc[idx_pag, 'Cliente_Fluxo_Final'] = (
+            pagamento_unico
+            - df.loc[idx_pag, 'Cliente_Contrato_Antigo']
+            - df.loc[idx_pag, 'Cliente_Novo_Contrato']
+        )
+
+        # Genial recebe mercado desde o início (pois o cliente paga desde o início)
+        df['Genial_Recebe_Mensal'] = df['Fluxo Mercado']
+
+    elif modo_operacao == "modo_b":
+
+        # Fator do mês de início (mês 1) para descontar ao início
+        du_inicio = 1 * 21
+        cdi_inicio = interpolar_flat_forward(du_inicio, curva_anbima)
+        fator_inicio = ((1 + cdi_inicio) * (1 + spread)) ** (du_inicio / 252)
+        # Fator relativo ao mês de início
+        df['Fator_Desconto_Rel_Inicio'] = df['Fator_Desconto'] / fator_inicio
+
+        # VP calculado apenas para meses a partir do mês de pagamento, descontado ao início
+        df['Cliente_Recebe_VP'] = df.apply(
+            lambda row: row['Fluxo Mercado'] / row['Fator_Desconto_Rel_Inicio'] if row['Data_Obj'] >= data_pagamento else 0.0,
+            axis=1
+        )
+        pagamento_unico = df['Cliente_Recebe_VP'].sum()
+
+        df['Cliente_Contrato_Antigo'] = df['Fluxo Contrato']
+        # Cliente só paga mercado a partir do mês de pagamento
+        df['Cliente_Novo_Contrato'] = df.apply(
+            lambda row: row['Fluxo Mercado'] if row['Data_Obj'] >= data_pagamento else 0.0,
+            axis=1
+        )
+
+        # Fluxo mensal:
+        # - Antes do pagamento: apenas contrato antigo (sem aditivo de mercado)
+        # - A partir do pagamento: contrato antigo + mercado
+        df['Cliente_Fluxo_Final'] = df.apply(
+            lambda row: -row['Cliente_Contrato_Antigo']
+            if row['Data_Obj'] < data_pagamento
+            else -row['Cliente_Contrato_Antigo'] - row['Cliente_Novo_Contrato'],
+            axis=1
+        )
+        # No mês de início (mês 1): cliente recebe o pagamento único antecipado
+        idx_inicio = df.index[0]
+        df.loc[idx_inicio, 'Cliente_Fluxo_Final'] = (
+            pagamento_unico
+            - df.loc[idx_inicio, 'Cliente_Contrato_Antigo']
+            # sem mercado antes do pagamento
+        )
+
+        # Genial recebe mercado apenas a partir do mês de pagamento
+        df['Genial_Recebe_Mensal'] = df.apply(
+            lambda row: row['Fluxo Mercado'] if row['Data_Obj'] >= data_pagamento else 0.0,
+            axis=1
+        )
+
     df['Peso_MWh'] = df['Horas'] * df['Volume']
 
     resumo_anual = df.groupby('Ano').apply(lambda g: pd.Series({
         'MWh Total':            g['Peso_MWh'].sum(),
         'Cliente_Recebe_VP':    g['Cliente_Recebe_VP'].sum(),
-        'Cliente_Paga_VP':      g['Cliente_Paga_VP'].sum(),
+        'Cliente_Paga_VP':      g['Fluxo Mercado'].sum(),
         'Genial_Recebe_Mensal': g['Genial_Recebe_Mensal'].sum(),
     })).reset_index()
 
     resumo_anual['Preço Venda Cliente (R$/MWh)']  = resumo_anual['Cliente_Recebe_VP']    / resumo_anual['MWh Total']
-    resumo_anual['Preço Compra Cliente (R$/MWh)'] = resumo_anual['Cliente_Paga_VP']       / resumo_anual['MWh Total']
-    resumo_anual['Preço Recebe Genial (R$/MWh)']  = resumo_anual['Genial_Recebe_Mensal']  / resumo_anual['MWh Total']
+    resumo_anual['Preço Compra Cliente (R$/MWh)'] = resumo_anual['Cliente_Paga_VP']      / resumo_anual['MWh Total']
+    resumo_anual['Preço Recebe Genial (R$/MWh)']  = resumo_anual['Genial_Recebe_Mensal'] / resumo_anual['MWh Total']
     resumo_anual['Preço Contrato Input (R$/MWh)'] = resumo_anual['Ano'].map(lambda x: dados_operacao[x]['contrato'])
 
-    # ── Fluxo final do cliente ──
-    pagamento_unico = df['Cliente_Recebe_VP'].sum()
-
-    df['Cliente_Contrato_Antigo'] = df['Fluxo Contrato']
-    df['Cliente_Novo_Contrato']   = df.apply(
-        lambda row: row['Fluxo Mercado'] if row['Data_Obj'] >= data_pagamento else 0.0,
-        axis=1
-    )
-
-    # Pagamento cai no mês escolhido pelo usuário
-    idx_pagamento = df[df['Data_Obj'] == data_pagamento].index
-    if len(idx_pagamento) > 0:
-        idx_pag = idx_pagamento[0]
-    else:
-        idx_pag = df.index[0]  # fallback para o primeiro mês
-
-    # Antes do pagamento: cliente paga apenas o contrato antigo
-    # A partir do pagamento: cliente paga contrato antigo + novo contrato de mercado
-    df['Cliente_Fluxo_Final'] = df.apply(
-        lambda row: -row['Cliente_Contrato_Antigo']
-        if row['Data_Obj'] < data_pagamento
-        else -row['Cliente_Contrato_Antigo'] - row['Cliente_Novo_Contrato'],
-        axis=1
-    )
-
-    # No mês do pagamento: adiciona o recebimento único
-    df.loc[idx_pag, 'Cliente_Fluxo_Final'] = (
-        pagamento_unico
-        - df.loc[idx_pag, 'Cliente_Contrato_Antigo']
-        - df.loc[idx_pag, 'Cliente_Novo_Contrato']
-    )
-
-    # ─────────────────────────────────────────────
     st.subheader("👤 Visão Cliente")
-    st.caption(f"A Genial paga ao cliente o valor presente de toda a operação em uma única parcela em **{pagamento_str}**.")
+
+    if modo_operacao == "padrao":
+        st.caption(f"A Genial paga ao cliente o valor presente de toda a operação em uma única parcela em **{pagamento_str}**.")
+    elif modo_operacao == "modo_a":
+        st.caption(f"Cliente paga o aditivo de mercado **desde {inicio_str}**. A Genial paga o VP de toda a operação em uma única parcela em **{pagamento_str}**.")
+    elif modo_operacao == "modo_b":
+        st.caption(f"A Genial paga ao cliente o VP antecipado em **{inicio_str}** (referente ao período {pagamento_str} → {fim_str}). Cliente não paga aditivo até {pagamento_str}, quando passa a pagar o novo contrato de mercado.")
 
     if contrato_genial:
         st.info("""
@@ -362,10 +475,6 @@ A operação funciona da seguinte forma:
         'Cliente_Fluxo_Final':     'Fluxo Final (R$)',
     })
 
-    def colorir_fluxo(val):
-        cor = "#2ecc71" if val >= 0 else "#e74c3c"
-        return f"color: {cor}; font-weight: bold;"
-
     st.dataframe(df_cliente.style
         .format({
             'Volume (MWm)':         '{:.2f}',
@@ -389,23 +498,28 @@ A operação funciona da seguinte forma:
 
     st.divider()
 
-    # ─────────────────────────────────────────────
     st.subheader("🏦 Visão Genial Investimentos")
-    st.caption(f"Genial **paga** ao cliente o VP total em **{pagamento_str}** e **recebe** mensalmente o valor de mercado.")
 
-    # Desembolso único = pagamento antecipado ao cliente (VP total dos fluxos de mercado)
+    if modo_operacao == "padrao":
+        st.caption(f"Genial **paga** ao cliente o VP total em **{pagamento_str}** e **recebe** mensalmente o valor de mercado a partir de {pagamento_str}.")
+    elif modo_operacao == "modo_a":
+        st.caption(f"Genial **paga** ao cliente o VP total em **{pagamento_str}** e **recebe** mensalmente o valor de mercado **desde {inicio_str}**.")
+    elif modo_operacao == "modo_b":
+        st.caption(f"Genial **paga** ao cliente o VP antecipado em **{inicio_str}** e **recebe** mensalmente o valor de mercado a partir de **{pagamento_str}**.")
+
     desembolso_genial = pagamento_unico
 
-    # Fluxo mensal da Genial: recebe mercado apenas a partir do mês do pagamento
     df_genial = df[['mês', 'Data_Obj', 'Volume', 'Genial_Recebe_Mensal']].copy()
-    df_genial['Genial_Recebe_Mensal'] = df_genial.apply(
-        lambda row: row['Genial_Recebe_Mensal'] if row['Data_Obj'] >= data_pagamento else 0.0,
-        axis=1
-    )
     df_genial['Genial_Desembolso'] = 0.0
-    df_genial.loc[idx_pag, 'Genial_Desembolso'] = -desembolso_genial
-    df_genial['Genial_Fluxo_Final'] = df_genial['Genial_Recebe_Mensal'] + df_genial['Genial_Desembolso']
 
+    if modo_operacao == "modo_b":
+        # Desembolso no primeiro mês
+        df_genial.loc[df_genial.index[0], 'Genial_Desembolso'] = -desembolso_genial
+    else:
+        # Desembolso no mês de pagamento
+        df_genial.loc[idx_pag, 'Genial_Desembolso'] = -desembolso_genial
+
+    df_genial['Genial_Fluxo_Final'] = df_genial['Genial_Recebe_Mensal'] + df_genial['Genial_Desembolso']
     lucro_genial = df_genial['Genial_Fluxo_Final'].sum()
 
     g1, g2, g3 = st.columns(3)
@@ -414,13 +528,13 @@ A operação funciona da seguinte forma:
     g3.metric("Resultado Líquido",        f"R$ {formatar_moeda_abrev(lucro_genial)}")
 
     st.markdown("**📅 Fluxo Mensal da Genial**")
-    df_genial = df_genial.drop(columns=['Data_Obj']).rename(columns={
+    df_genial_disp = df_genial.drop(columns=['Data_Obj']).rename(columns={
         'Volume':               'Volume (MWm)',
         'Genial_Recebe_Mensal': 'Recebe Mercado (R$)',
         'Genial_Fluxo_Final':   'Fluxo Final (R$)',
     })
 
-    st.dataframe(df_genial[['mês', 'Volume (MWm)', 'Recebe Mercado (R$)', 'Fluxo Final (R$)']].style
+    st.dataframe(df_genial_disp[['mês', 'Volume (MWm)', 'Recebe Mercado (R$)', 'Fluxo Final (R$)']].style
         .format({
             'Volume (MWm)':        '{:.2f}',
             'Recebe Mercado (R$)': 'R$ {:,.2f}',
