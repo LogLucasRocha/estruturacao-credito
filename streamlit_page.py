@@ -106,7 +106,7 @@ with st.expander("📅 2. Período e Configuração", expanded=True):
         fim_str = st.text_input("Fim da Operação (mm/aaaa)", value="12/2027")
 
     spread = st.number_input("Spread CDI (ex: 0.06)", value=0.06, format="%.4f", help="Taxa adicional ao CDI.")
-    pagamento_str = st.text_input("Mês do Pagamento Antecipado (mm/aaaa)", value=inicio_default, help="Mês em que a Genial realizará o pagamento único ao cliente.")
+    pagamento_str = st.text_input("Início do Pagamento (mm/aaaa)", value=inicio_default, help="Mês em que a Genial realizará o pagamento único ao cliente.")
     contrato_genial = st.toggle("Contrato Genial", value=False, help="Ativo = contrato Genial | Inativo = contrato externo")
 
     MODOS = {
@@ -381,20 +381,17 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
 
 A operação funciona da seguinte forma:
 - A Genial **aditiva o contrato original** para preços de mercado
-- O cliente **vende um contrato à Genial** ao preço de venda calculado
+- O cliente **vende um contrato à Genial** com preços e volumes acordados e registro antecipado na CCEE
 - O pagamento ao cliente ocorre de forma **integral e antecipada em M+0** (pagamento único à vista)
-- O cliente deve fazer o **registro antecipado do volume negociado na CCEE** a favor da Genial
         """)
     else:
         st.info("""
 **📄 Contrato Externo**
 
 A operação funciona da seguinte forma:
-- O cliente **cede seu contrato de compra** de energia à Genial
-- O cliente **vende um contrato à Genial** ao preço de venda calculado
+- O cliente **vende um contrato à Genial** com preços e volumes acordados e registro antecipado na CCEE
 - O pagamento ao cliente ocorre de forma **integral e antecipada em M+0** (pagamento único à vista)
 - A partir daí, o cliente passa a **comprar energia da Genial a preços de mercado**, com liquidação registrada mensalmente
-- O cliente deve fazer o **registro antecipado do volume negociado na CCEE** a favor da Genial
         """)
 
     # ── 4 big numbers cliente ──
