@@ -111,20 +111,10 @@ with st.expander("📅 2. Período e Configuração", expanded=True):
 
     # ── Modo de Operação ──
     MODOS = {
-        "📋 Modo Padrão": "padrao",
         "⚡ Modo A — Pagar desde o início, receber no pagamento": "modo_a",
         "🚀 Modo B — Receber crédito antecipado, pagar aditivo depois": "modo_b",
     }
     MODO_DESCRICOES = {
-        "padrao": """
-**Como funciona:**
-O cliente continua pagando somente seu contrato original até o mês do pagamento. No mês configurado, a Genial faz um pagamento único equivalente ao valor presente de todos os fluxos de mercado futuros. A partir desse mês, o cliente passa a pagar também o novo contrato de mercado mensalmente.
-
-**Exemplo — Contrato mar/25 a dez/27, pagamento em jun/25:**
-- **Mar–Mai/25:** Cliente paga apenas o contrato original (ex: R$ 130/MWh)
-- **Jun/25:** Genial paga o VP total ao cliente em parcela única
-- **Jun/25–Dez/27:** Cliente paga contrato original + mercado mensalmente
-""",
         "modo_a": """
 **Como funciona:**
 O cliente passa a pagar o novo contrato de mercado desde o primeiro mês da operação, antes mesmo de receber qualquer pagamento. Em contrapartida, a Genial desconta o VP de todo o período — incluindo os meses já aditivados — e entrega o crédito único no mês de pagamento configurado.
@@ -134,7 +124,7 @@ O cliente passa a pagar o novo contrato de mercado desde o primeiro mês da oper
 - **Jun/25:** Genial paga o VP de todo o período (mar/25 → dez/27) em parcela única
 - **Jun/25–Dez/27:** Cliente paga contrato original + mercado mensalmente
 
-> O VP recebido em jun/25 é maior que no Modo Padrão, pois inclui o desconto dos meses já aditivados.
+> O VP recebido em jun/25 é maior que no Modo B, pois inclui o desconto dos meses já aditivados.
 """,
         "modo_b": """
 **Como funciona:**
@@ -145,7 +135,7 @@ A Genial paga o crédito ao cliente logo no primeiro mês, referente ao período
 - **Mar–Mai/25:** Cliente paga apenas o contrato original (ex: R$ 130/MWh), sem aditivo
 - **Jun/25–Dez/27:** Cliente paga contrato original + mercado mensalmente
 
-> O VP recebido em mar/25 é menor que nos outros modos, pois cobre apenas o período jun/25 → dez/27.
+> O VP recebido em mar/25 é menor que no Modo A, pois cobre apenas o período jun/25 → dez/27.
 """,
     }
 
@@ -314,39 +304,7 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
     idx_pagamento = df[df['Data_Obj'] == data_pagamento].index
     idx_pag = idx_pagamento[0] if len(idx_pagamento) > 0 else df.index[0]
 
-    if modo_operacao == "padrao":
-
-        # VP total descontado ao mês de pagamento
-        df['Cliente_Recebe_VP'] = df.apply(
-            lambda row: row['Fluxo Mercado'] / row['Fator_Desconto_Relativo'] if row['Data_Obj'] >= data_pagamento else 0.0,
-            axis=1
-        )
-        pagamento_unico = df['Cliente_Recebe_VP'].sum()
-
-        df['Cliente_Contrato_Antigo'] = df['Fluxo Contrato']
-        df['Cliente_Novo_Contrato']   = df.apply(
-            lambda row: row['Fluxo Mercado'] if row['Data_Obj'] >= data_pagamento else 0.0,
-            axis=1
-        )
-
-        df['Cliente_Fluxo_Final'] = df.apply(
-            lambda row: -row['Cliente_Contrato_Antigo']
-            if row['Data_Obj'] < data_pagamento
-            else -row['Cliente_Contrato_Antigo'] - row['Cliente_Novo_Contrato'],
-            axis=1
-        )
-        df.loc[idx_pag, 'Cliente_Fluxo_Final'] = (
-            pagamento_unico
-            - df.loc[idx_pag, 'Cliente_Contrato_Antigo']
-            - df.loc[idx_pag, 'Cliente_Novo_Contrato']
-        )
-
-        df['Genial_Recebe_Mensal'] = df.apply(
-            lambda row: row['Fluxo Mercado'] if row['Data_Obj'] >= data_pagamento else 0.0,
-            axis=1
-        )
-
-    elif modo_operacao == "modo_a":
+    if modo_operacao == "modo_a":
 
         # VP relativo ao mês de pagamento, de TODOS os meses (incluindo os anteriores ao pagamento)
         df['Cliente_Recebe_VP'] = df['Fluxo Mercado'] / df['Fator_Desconto_Relativo']
@@ -430,9 +388,7 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
 
     st.subheader("👤 Visão Cliente")
 
-    if modo_operacao == "padrao":
-        st.caption(f"A Genial paga ao cliente o valor presente de toda a operação em uma única parcela em **{pagamento_str}**.")
-    elif modo_operacao == "modo_a":
+    if modo_operacao == "modo_a":
         st.caption(f"Cliente paga o aditivo de mercado **desde {inicio_str}**. A Genial paga o VP de toda a operação em uma única parcela em **{pagamento_str}**.")
     elif modo_operacao == "modo_b":
         st.caption(f"A Genial paga ao cliente o VP antecipado em **{inicio_str}** (referente ao período {pagamento_str} → {fim_str}). Cliente não paga aditivo até {pagamento_str}, quando passa a pagar o novo contrato de mercado.")
@@ -500,9 +456,7 @@ A operação funciona da seguinte forma:
 
     st.subheader("🏦 Visão Genial Investimentos")
 
-    if modo_operacao == "padrao":
-        st.caption(f"Genial **paga** ao cliente o VP total em **{pagamento_str}** e **recebe** mensalmente o valor de mercado a partir de {pagamento_str}.")
-    elif modo_operacao == "modo_a":
+    if modo_operacao == "modo_a":
         st.caption(f"Genial **paga** ao cliente o VP total em **{pagamento_str}** e **recebe** mensalmente o valor de mercado **desde {inicio_str}**.")
     elif modo_operacao == "modo_b":
         st.caption(f"Genial **paga** ao cliente o VP antecipado em **{inicio_str}** e **recebe** mensalmente o valor de mercado a partir de **{pagamento_str}**.")
