@@ -355,8 +355,10 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
 
     df['Peso_MWh'] = df['Horas'] * df['Volume']
 
+    # ── MWh Genial: apenas meses com recebimento > 0 (corrige média no Modo B) ──
     resumo_anual = df.groupby('Ano').apply(lambda g: pd.Series({
         'MWh Total':            g['Peso_MWh'].sum(),
+        'MWh Genial':           g.loc[g['Genial_Recebe_Mensal'] > 0, 'Peso_MWh'].sum(),
         'Cliente_Recebe_VP':    g['Cliente_Recebe_VP'].sum(),
         'Cliente_Paga_VP':      g['Fluxo Mercado'].sum(),
         'Genial_Recebe_Mensal': g['Genial_Recebe_Mensal'].sum(),
@@ -364,7 +366,7 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
 
     resumo_anual['Preço Venda Cliente (R$/MWh)']  = resumo_anual['Cliente_Recebe_VP']    / resumo_anual['MWh Total']
     resumo_anual['Preço Compra Cliente (R$/MWh)'] = resumo_anual['Cliente_Paga_VP']      / resumo_anual['MWh Total']
-    resumo_anual['Preço Recebe Genial (R$/MWh)']  = resumo_anual['Genial_Recebe_Mensal'] / resumo_anual['MWh Total']
+    resumo_anual['Preço Recebe Genial (R$/MWh)']  = resumo_anual['Genial_Recebe_Mensal'] / resumo_anual['MWh Genial']
     resumo_anual['Preço Contrato Input (R$/MWh)'] = resumo_anual['Ano'].map(lambda x: dados_operacao[x]['contrato'])
 
     # ── VISÃO CLIENTE ──────────────────────────────────────────────
@@ -499,8 +501,8 @@ A operação funciona da seguinte forma:
         'Preço Venda Cliente (R$/MWh)': 'Preço de Compra do Contrato Antigo (R$/MWh)',
     })
     st.dataframe(df_preco_genial.style.format({
-        'Preço de Venda do Novo Contrato (R$/MWh)':        'R$ {:.2f}',
-        'Preço de Compra do Contrato Antigo (R$/MWh)': 'R$ {:.2f}',
+        'Preço de Venda do Novo Contrato (R$/MWh)':     'R$ {:.2f}',
+        'Preço de Compra do Contrato Antigo (R$/MWh)':  'R$ {:.2f}',
     }), use_container_width=True, hide_index=True)
 
     st.divider()
