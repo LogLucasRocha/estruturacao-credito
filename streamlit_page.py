@@ -106,12 +106,11 @@ with st.expander("📅 2. Período e Configuração", expanded=True):
         fim_str = st.text_input("Fim da Operação (mm/aaaa)", value="12/2027")
 
     spread = st.number_input("Spread CDI (ex: 0.06)", value=0.06, format="%.4f", help="Taxa adicional ao CDI.")
-    pagamento_str = st.text_input("Início do Pagamento (mm/aaaa)", value=inicio_default, help="Mês em que a Genial realizará o pagamento único ao cliente.")
     contrato_genial = st.toggle("Contrato Genial", value=False, help="Ativo = contrato Genial | Inativo = contrato externo")
 
     MODOS = {
-        "⚡ Modo A — Pagar desde o início, receber no pagamento": "modo_a",
-        "🚀 Modo B — Receber crédito antecipado, pagar aditivo depois": "modo_b",
+        "⚡ Modo A — Pagar aditivo desde o início e receber crédito em data futura": "modo_a",
+        "🚀 Modo B — Receber crédito no primeiro mês e pagar aditivo em data futura": "modo_b",
     }
     MODO_DESCRICOES = {
         "modo_a": """
@@ -141,6 +140,13 @@ A Genial paga o crédito ao cliente logo no primeiro mês, referente ao período
     modo_label = st.selectbox("Selecione o modo de operação:", options=list(MODOS.keys()))
     modo_operacao = MODOS[modo_label]
     st.info(MODO_DESCRICOES[modo_operacao])
+
+    label_pagamento = (
+        "Data de Recebimento do Crédito (mm/aaaa)"
+        if modo_operacao == "modo_a"
+        else "Início do Pagamento do Aditivo (mm/aaaa)"
+    )
+    pagamento_str = st.text_input(label_pagamento, value=inicio_default)
 
 try:
     data_inicio = datetime.strptime(inicio_str, "%m/%Y")
@@ -355,7 +361,6 @@ if st.button("🚀 Gerar Análise", use_container_width=True):
 
     df['Peso_MWh'] = df['Horas'] * df['Volume']
 
-    # ── MWh Genial: apenas meses com recebimento > 0 (corrige média no Modo B) ──
     resumo_anual = df.groupby('Ano').apply(lambda g: pd.Series({
         'MWh Total':            g['Peso_MWh'].sum(),
         'MWh Genial':           g.loc[g['Genial_Recebe_Mensal'] > 0, 'Peso_MWh'].sum(),
@@ -396,7 +401,6 @@ A operação funciona da seguinte forma:
 - A partir daí, o cliente passa a **comprar energia da Genial a preços de mercado**, com liquidação registrada mensalmente
         """)
 
-    # ── 4 big numbers cliente ──
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Contrato Original (total)", f"R$ {formatar_moeda_abrev(-df['Cliente_Contrato_Antigo'].sum())}")
     c2.metric("Recebe da Genial (único)",  f"R$ {formatar_moeda_abrev(pagamento_unico)}")
@@ -467,7 +471,6 @@ A operação funciona da seguinte forma:
     df_genial['Genial_Fluxo_Final'] = df_genial['Genial_Recebe_Mensal'] + df_genial['Genial_Desembolso']
     lucro_genial = df_genial['Genial_Fluxo_Final'].sum()
 
-    # ── 4 big numbers Genial ──
     g1, g2, g3, g4 = st.columns(4)
     g1.metric("Recebe (total futuro)",  f"R$ {formatar_moeda_abrev(df_genial['Genial_Recebe_Mensal'].sum())}")
     g2.metric("Desembolso na Cabeça",   f"R$ {formatar_moeda_abrev(-desembolso_genial)}")
